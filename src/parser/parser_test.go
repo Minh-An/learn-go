@@ -2,6 +2,7 @@ package parser
 
 import (
 	"ast"
+	"fmt"
 	"lexer"
 	"testing"
 )
@@ -106,7 +107,7 @@ func TestIdentifierExpression(t *testing.T) {
 	}
 	statement, ok := program.Statements[0].(*ast.ExpressionStatement)
 	if !ok {
-		t.Fatalf("program.Statements[0] not *ast.LetStatment. got=%T",
+		t.Fatalf("program.Statements[0] not *ast.ExpressionStatement. got=%T",
 			program.Statements[0])
 	}
 
@@ -136,21 +137,67 @@ func TestIntegerIdentifierExpression(t *testing.T) {
 	}
 	statement, ok := program.Statements[0].(*ast.ExpressionStatement)
 	if !ok {
-		t.Fatalf("program.Statements[0] not *ast.LetStatment. got=%T",
+		t.Fatalf("program.Statements[0] not *ast.ExpressionStatement. got=%T",
 			program.Statements[0])
 	}
 
-	ident, ok := statement.Expression.(*ast.IntegerLiteral)
+	testIntegerLiteral(t, statement.Expression, 5)
+
+}
+
+func TestParsingPrefixExpressions(t *testing.T) {
+	prefixTests := []struct {
+		input        string
+		operator     string
+		integerValue int64
+	}{
+		{"!5", "!", 5},
+		{"-15;", "-", 15},
+	}
+
+	for _, tt := range prefixTests {
+		l := lexer.New(tt.input)
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("program.Statements not = %d. got=%d", 1, len(program.Statements))
+		}
+		statement, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("program.Statements[0] not *ast.ExpressionStatement. got=%T",
+				program.Statements[0])
+		}
+		print(statement)
+
+		exp, ok := statement.Expression.(*ast.PrefixExpression)
+		if !ok {
+			t.Fatalf("expression not *ast.IntegerLiteral. got=%T",
+				statement.Expression)
+		}
+		if exp.Operator != tt.operator {
+			t.Errorf("ident.Value not %s. got=%s", tt.operator, exp.Operator)
+		}
+		if !testIntegerLiteral(t, exp.Right, tt.integerValue) {
+			return
+		}
+	}
+}
+
+func testIntegerLiteral(t *testing.T, il ast.Expression, value int64) bool {
+	integer, ok := il.(*ast.IntegerLiteral)
 	if !ok {
 		t.Fatalf("expression not *ast.IntegerLiteral. got=%T",
-			statement.Expression)
+			il)
 	}
-	if ident.Value != 5 {
-		t.Errorf("ident.Value not %d. got=%d", 5, ident.Value)
+	if integer.Value != value {
+		t.Errorf("ident.Value not %d. got=%d", 5, integer.Value)
 	}
-	if ident.TokenLiteral() != "5" {
-		t.Errorf("ident.TokenLiteral not %s. got=%s", "5", ident.TokenLiteral())
+	if integer.TokenLiteral() != fmt.Sprintf("%d", value) {
+		t.Errorf("ident.TokenLiteral not %s. got=%s", "5", integer.TokenLiteral())
 	}
+	return true
 }
 
 func checkParserErrors(t *testing.T, p *Parser) {
