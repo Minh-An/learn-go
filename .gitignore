@@ -14,3 +14,7 @@ pkg/
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+
+src/github.com/
+src/golang.org/
+src/google.golang.org/
