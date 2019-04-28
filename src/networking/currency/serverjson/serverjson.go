@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"time"
 
 	curr "github.com/vladimirvivien/go-networking/currency/lib"
 )
@@ -24,6 +26,10 @@ var currencies = curr.Load("../data.csv")
 //request used to search currency list
 
 // Focus:
+// improves robustness of server code by introducing configuration
+// for read/write timeout values. Ensures that a client can't hold
+// a connection hostage by taking a long time to send/receive data
+
 // use encoding packages to serialize data to/from GO data types
 // to JSON representation.
 // Uses encoding/json package Encoder/Decoder types that accept
@@ -49,15 +55,36 @@ func main() {
 	log.Println("**** Global Currency Service ***")
 	log.Printf("Service started: (%s) %s\n", network, addr)
 
+	// delay to sleep when accept fails w/ temporary error
+	acceptDelay := time.Millisecond * 10
+	acceptCount := 0
+
 	// Connection loop - Handle incoming requests
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			fmt.Println(err)
-			if err := conn.Close(); err != nil {
-				log.Println("Failed to close connection:", err)
+			switch e := err.(type) {
+			case net.Error:
+				//if temp error, attempt to connect again
+				if e.Temporary() {
+					if acceptCount > 5 {
+						log.Printf("Unable to connect after %d retries: %v", acceptCount, err)
+						return
+					}
+					acceptCount++
+					acceptDelay *= 2
+					time.Sleep(acceptDelay)
+					continue
+				}
+			default:
+				fmt.Println(err)
+				if err := conn.Close(); err != nil {
+					log.Println("Failed to close connection:", err)
+				}
+				continue
 			}
-			continue
+			acceptDelay = time.Millisecond * 10
+			acceptCount = 0
 		}
 		log.Println("Connected to", conn.RemoteAddr())
 
@@ -77,7 +104,12 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	decoder := json.NewDecoder(conn)
+	// 45 second deadline
+	if err := conn.SetDeadline(time.Now().Add(time.Second * 45)); err != nil {
+		log.Println("Failed to set deadline:", err)
+		return
+	}
+
 	encoder := json.NewEncoder(conn)
 
 	// Command Loop
@@ -85,15 +117,48 @@ func handleConnection(conn net.Conn) {
 
 		// Decode incoming data -> curr.CurrencyRequest
 		var req curr.CurrencyRequest
+		decoder := json.NewDecoder(conn)
 		if err := decoder.Decode(&req); err != nil {
-			log.Println("Failed to decode request", err)
-			return
+			switch err := err.(type) {
+			case net.Error:
+				if err.Timeout() {
+					log.Println("Deadline reached, disconnecting...")
+				}
+				log.Println("Network error: ", err)
+				return
+			default:
+				if err == io.EOF {
+					log.Println("Closing connection", err)
+					return
+				}
+				if encerr := encoder.Encode(&curr.CurrencyError{Error: err.Error()}); encerr != nil {
+					fmt.Println("Failed error encoding:", encerr)
+					return
+				}
+				continue
+			}
+
 		}
 
 		result := curr.Find(currencies, req.Get)
 
 		if err := encoder.Encode(&result); err != nil {
-			log.Println("Failed to encode data", err)
+			switch err := err.(type) {
+			case net.Error:
+				log.Println("Failed to send response: ", err)
+				return
+			default:
+				if encerr := encoder.Encode(&curr.CurrencyError{Error: err.Error()}); encerr != nil {
+					fmt.Println("Failed error encoding:", encerr)
+					return
+				}
+				continue
+			}
+		}
+
+		//renew dealine for 45 sec later
+		if err := conn.SetDeadline(time.Now().Add(time.Second * 45)); err != nil {
+			log.Println("Failed to set deadline:", err)
 			return
 		}
 	}
