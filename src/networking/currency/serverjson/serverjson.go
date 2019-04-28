@@ -40,7 +40,7 @@ var currencies = curr.Load("../data.csv")
 // 	-host host endpoint, default ":4040"
 func main() {
 	var addr string
-	flag.StringVar(&addr, "addr", ":4040", "Serpice endpoid [IP Addr or Socket Path]")
+	flag.StringVar(&addr, "addr", ":4040", "Service endpoint [IP Addr or Socket Path]")
 	flag.Parse()
 
 	network := "tcp"
@@ -110,8 +110,6 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
-	encoder := json.NewEncoder(conn)
-
 	// Command Loop
 	for {
 
@@ -131,6 +129,7 @@ func handleConnection(conn net.Conn) {
 					log.Println("Closing connection", err)
 					return
 				}
+				encoder := json.NewEncoder(conn)
 				if encerr := encoder.Encode(&curr.CurrencyError{Error: err.Error()}); encerr != nil {
 					fmt.Println("Failed error encoding:", encerr)
 					return
@@ -142,6 +141,7 @@ func handleConnection(conn net.Conn) {
 
 		result := curr.Find(currencies, req.Get)
 
+		encoder := json.NewEncoder(conn)
 		if err := encoder.Encode(&result); err != nil {
 			switch err := err.(type) {
 			case net.Error:
